@@ -1,0 +1,88 @@
+No, Redis does not automatically update cached objects when the attributes of the underlying object change. Redis is a key-value store, and it treats the stored values as opaque blobs of data. It has no internal knowledge about the structure or content of these values (i.e. it does not parse and understand java objects). It only knows that a value is associated with a key.
+
+Here's a detailed breakdown of why and what you need to do:
+
+Why Redis Doesn't Automatically Update Cached Objects:
+
+Key-Value Store Principle: Redis operates on a fundamental key-value principle. When you use opsForValue().set(key, object), you're instructing Redis to store a serialized representation of your object under the given key. Redis does not parse your object as a java object, and does not try to listen any change.
+
+No Object Tracking: Redis does not track the attributes of the objects it stores. It does not have built-in mechanisms to monitor changes to your underlying objects.
+
+Data Inconsistency: If Redis were to automatically update on attribute changes, it would introduce complex data consistency problems. For example, what if changes were happening in another system? Would redis listen to those changes? It is best to keep Redis just as a key-value store, and you have full control over storing and fetching the data.
+
+Performance Impact: Automatically monitoring object attributes for changes and then updating the cache would introduce a very high overhead and degrade Redis performance. Redis is very fast, and it is fast by keeping things simple and not trying to be more than just a key-value store.
+
+Serialization: As we saw earlier, our objects are serialized into JSON strings using GenericJackson2JsonRedisSerializer, and redis only stores this string value, it does not understand the values.
+
+How to Keep Cached Objects Up-to-Date:
+
+Explicit Cache Updates: You need to explicitly update the Redis cache whenever the attributes of your object change. You can do this using redisTemplate.opsForValue().set(key, updatedObject)
+
+When Data Changes: Whenever your data source (database, service, etc.) modifies an object, your application needs to:
+
+Fetch the updated object
+
+Serialize the updated object again into JSON string using the GenericJackson2JsonRedisSerializer.
+
+Update the value in Redis cache using redisTemplate.opsForValue().set(key, updatedObject).
+
+Cache Invalidation Strategies:
+
+Eviction-based Invalidation: When the object is updated, you can DEL <key> of the stored object, or use time based expiry, then the next call will fetch it again from database and store the updated value.
+
+Time-To-Live (TTL): Set an expiry for the key when writing the data to redis, which will force redis to update the data after the time.
+
+redisTemplate.opsForValue().set(object.getId(), object, 10, TimeUnit.MINUTES); // Expiry in 10 minutes.
+Use code with caution.
+Java
+Update on Read or Write:
+
+Write-Through: Update Redis cache whenever the data in backend changes.
+
+Write-Behind (Write-Back): Write updates to the cache, and update data source (DB, service etc) later.
+
+Lazy Loading/Cache-Aside: When reading, check if data is available in cache, or fetch from database. Update the cache when it is fetched from database.
+
+Data Consistency: Be aware that some inconsistency may occur if there are changes and concurrent updates across different system.
+
+Example:
+
+Let's say you have a TerrestrialObject stored in Redis with ID "1". If you change the name of this object in your database and expect the cached object in Redis to update, you must also update redis using set command.
+
+Code Example:
+
+public class MyService{
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    public void updateTerrestrialObject(String id, String updatedName){
+
+        TerrestrialObject terretrialObject = fetchObjectFromDatabase(id); //Fetch from backend database or service
+        terretrialObject.setName(updatedName);
+        updateDatabase(terretrialObject); //update backend
+
+        redisTemplate.opsForValue().set(id,terretrialObject); // Update the cache with the updated object.
+
+    }
+}
+Use code with caution.
+Java
+Key Considerations:
+
+Manual Updates: You are responsible for updating the cache based on your specific application logic.
+
+Consistency vs. Performance: Choose a cache update strategy that balances data consistency with performance requirements.
+
+Read vs Write Heavy: A read heavy application may benefit from using Lazy Loading (Cache Aside) technique, whereas a write heavy application may benefit from using Write-Through pattern.
+
+Complexity: Integrating proper caching logic adds complexity to your application but can also provide significant performance gains.
+
+In summary:
+
+Redis does not automatically update cached objects when attributes change. You need to implement a caching strategy that explicitly handles updates by:
+
+Updating the data when the underlying object is updated.
+
+Invalidating data on updates using TTL or delete options.
+
+By taking these steps, you can maintain a consistent and up-to-date cache using Redis.
